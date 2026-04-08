@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+
+      - name: Bump version
+        id: bump
+        run: |
+          CURRENT=$(cat VERSION)
+          NEXT=$((CURRENT + 1))
+          echo "$NEXT" > VERSION
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Create app bundle
+        run: |
+          mkdir -p WorldClockMenuBar.app/Contents/MacOS
+          mkdir -p WorldClockMenuBar.app/Contents/Resources
+          cp .build/release/WorldClockMenuBar WorldClockMenuBar.app/Contents/MacOS/
+          cat > WorldClockMenuBar.app/Contents/Info.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>WorldClockMenuBar</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.worldclock.menubar</string>
+            <key>CFBundleName</key>
+            <string>WorldClockMenuBar</string>
+            <key>CFBundleVersion</key>
+            <string>${{ steps.bump.outputs.version }}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ steps.bump.outputs.version }}</string>
+            <key>LSUIElement</key>
+            <true/>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Archive
+        run: |
+          zip -r WorldClockMenuBar-v${{ steps.bump.outputs.version }}.zip WorldClockMenuBar.app
+
+      - name: Commit version bump and create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "Release v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push
+          git push --tags
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.bump.outputs.version }}"
+          name: "WorldClockMenuBar v${{ steps.bump.outputs.version }}"
+          files: WorldClockMenuBar-v${{ steps.bump.outputs.version }}.zip
